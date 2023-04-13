@@ -24,8 +24,8 @@ training_data, training_data_labels, testing_data, testing_data_labels, loss_wei
 rnn = RNN(input_size=6, output_size=4, dropout=dropout, linear_hidden=linear_size, lstm_hidden=lstm_size, lstm_layers=1).to(device)
 criterion = nn.CrossEntropyLoss()
 # criterion = nn.CrossEntropyLoss()
-# lr = 0.0001
-lr = 0.001
+lr = 0.0001
+# lr = 0.001
 # mini_batch_size = 512
 mini_batch_size = 1024
 optimizer = torch.optim.Adam(rnn.parameters(), lr=lr, betas=(0.9, 0.99))

@@ -92,3 +92,8 @@ class RNN(nn.Module):
 #         x = F.relu(x)
 #         x = self.linear2(x)
 #         return x
+
+class ARNN(nn.Module):
+    def __init__(self, input_size, output_size, dropout, lstm_hidden, linear_hidden, lstm_layers):
+        super(ARNN, self).__init__()
+        self.encoder_input = nn.Linear(input_size, 512)
