@@ -15,7 +15,7 @@ from sklearn.metrics import f1_score
 device = torch.device("cuda:0")
 # device = torch.device("cpu")
 
-window = 1
+window = 15
 lstm_size = 500
 linear_size = 278
 dropout = 0.175
