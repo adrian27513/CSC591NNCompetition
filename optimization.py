@@ -11,6 +11,7 @@ from model import RNN
 from util import get_data
 from ax.service.managed_loop import optimize
 from sklearn.metrics import confusion_matrix
+from sklearn.metrics import f1_score
 
 
 device = torch.device("cuda:0")
@@ -34,15 +35,19 @@ def train_model(model, parameters, training_data, training_data_labels, criterio
             input_label = batch[1]
             batch_input = torch.split(input_data, mini_batch_size)
             batch_label = torch.split(input_label, mini_batch_size)
+            state = None
             for batch_in, batch_label in zip(batch_input, batch_label):
                 test_in = batch_in.to(device=device)
                 test_in.to(device)
                 test_label = batch_label.to(device=device)
-                output = model(test_in)
+                test_in = F.pad(test_in, (0, 0, 0, 0, 0, mini_batch_size - test_in.shape[0]))
+                test_label = F.pad(test_label, (0, mini_batch_size - test_label.shape[0]))
+                output, state = model(test_in, state)
                 model.zero_grad()
+                # print(test_label.tolist())
                 loss = criterion(output, test_label)
                 total_loss.append(loss.item())
-                loss.backward()
+                loss.backward(retain_graph=True)
                 optimizer.step()
         print("Average Loss:", np.average(total_loss))
         iter_time = time.time() - start
@@ -70,16 +75,20 @@ def eval_model(model, parameters, testing_data, testing_data_labels, criterion):
         total = 0
         actual = []
         predicted = []
+        state = None
         mini_batch_size = parameters.get("mini_batch_size", 512)
         for subject_data in list(zip(testing_data, testing_data_labels)):
             input_data = subject_data[0].to(device=device)
             test_label = subject_data[1].to(device=device)
             batch_input = torch.split(input_data, mini_batch_size)
             batch_label = torch.split(test_label, mini_batch_size)
+            state = None
             for batch_in, batch_label in zip(batch_input, batch_label):
                 test_in = batch_in.to(device=device)
                 test_label = batch_label.to(device=device)
-                output = model(test_in)
+                test_in = F.pad(test_in, (0, 0, 0, 0, 0, mini_batch_size - test_in.shape[0]))
+                test_label = F.pad(test_label, (0, mini_batch_size - test_label.shape[0]))
+                output, state = model(test_in, state)
                 loss = criterion(output, test_label)
                 test_losses.append(loss.item())
                 max_pred = torch.argmax(output, dim=1)
@@ -92,7 +101,8 @@ def eval_model(model, parameters, testing_data, testing_data_labels, criterion):
         confusion = confusion_matrix(actual, predicted)
         print(confusion)
         print("Loss:", np.average(test_losses))
-        return pred_sum / total
+        print("Accuracy:", pred_sum / total)
+        return f1_score(actual, predicted, average='macro')
 
 
 def train_evaluate(parameters):
@@ -100,25 +110,26 @@ def train_evaluate(parameters):
     training_data, training_data_labels, testing_data, testing_data_labels, weight = get_data(
         parameters.get("window_size", 5), verbose=False)
     untrained_model = init_model(parameters)
-    criterion = nn.CrossEntropyLoss()
+    criterion = nn.CrossEntropyLoss(weight=weight)
     trained_model = train_model(model=untrained_model, parameters=parameters, training_data=training_data,
                                 training_data_labels=training_data_labels, criterion=criterion)
     accuracy = eval_model(model=trained_model, parameters=parameters, testing_data=testing_data,
                           testing_data_labels=testing_data_labels, criterion=criterion)
-    print("Accuracy:", accuracy)
+    print("F1:", accuracy)
     return accuracy
 
 best_parameters, values, experiment, model = optimize(
     parameters=[
-        {"name": "dropout", "type": "range", "bounds": [0.0, 0.9]},
+        {"name": "dropout", "type": "range", "bounds": [0.0, 0.99]},
         {"name": "window_size", "type": "range", "bounds": [1, 20]},
         {"name": "linear_hidden", "type": "range", "bounds": [1, 500]},
         {"name": "lstm_hidden", "type": "range", "bounds": [1, 500]},
+        {"name": "learning_rate", "type": "range", "bounds": [0.0001, 0.1]},
         # {"name": "lstm_layers", "type": "range", "bounds": [1, 3]}
     ],
     evaluation_function=train_evaluate,
-    objective_name="Accuracy",
-    total_trials=20
+    objective_name="F1",
+    total_trials=40
 )
 
 print(best_parameters)
