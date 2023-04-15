@@ -4,7 +4,11 @@ import torch
 import numpy as np
 import torch.nn.functional as F
 import random
+import matplotlib.pyplot as plt
+
 device = torch.device("cuda")
+
+
 # from imblearn.under_sampling import RandomUnderSampler
 def align_data(subject):
     gyro_names = ['X_acc', 'Y_acc', 'Z_acc', 'X', 'Y', 'Z']
@@ -25,24 +29,69 @@ def align_data(subject):
     merge = pd.merge(gyro, labels, how='inner', on='time')
     merge = merge.drop(columns=['time'])
 
-    # count_class0, count_class1, count_class2, count_class3 = merge.label.value_counts()
-    # class0 = merge[merge['label'] == 0]
-    # class1 = merge[merge['label'] == 1]
-    # class2 = merge[merge['label'] == 2]
-    # class3 = merge[merge['label'] == 3]
-    #
-    # count0 = len(class0.index)
-    # count1 = len(class1.index)
-    # count2 = len(class2.index)
-    # count3 = len(class3.index)
-    #
-    # print(count1, count2, count3)
-    # average = int((count1 + count2 + count3)/4)
-    # if count0 != 0:
-    #     class0 = class0.sample(average)
-    # resampled = pd.concat([class0, class1, class2, class3], axis=0)
-    # print(resampled)
+    counts = merge['label'].value_counts()
+    keys = counts.keys().tolist()
+    values = counts.tolist()
+    average = 0
+    zeros = 0
+    ones = 0
+    twos = 0
+    threes = 0
+
+    try:
+        zeros = int(values[keys.index(0.0)])
+    except:
+        pass
+    try:
+        ones = int(values[keys.index(1.0)])
+    except:
+        pass
+
+    try:
+        twos = int(values[keys.index(2.0)])
+    except:
+        pass
+
+    try:
+        threes = int(values[keys.index(3.0)])
+    except:
+        pass
+
+    average = (ones + twos + threes) / 4
+    # average = 10
+
+    # print(merge['label'].value_counts())
+    # print(average)
+    # merge.plot()
+    # plt.show()
+    # plt.clf()
+    # merge['label'].value_counts().plot.bar()
+    # plt.show()
+    # plt.clf()
+    if average != 0:
+        zero_df = merge[merge.label == 0].sample(n=max(0,zeros - int(average)))
+        merge = merge.drop(zero_df.index)
+
+        ones_df = merge[merge.label == 1].sample(n=max(0,ones - int(average/2)))
+        merge = merge.drop(ones_df.index)
+
+        twos_df = merge[merge.label == 2].sample(n=max(0,twos - int(average)))
+        merge = merge.drop(twos_df.index)
+
+        three_df = merge[merge.label == 3].sample(n=max(0,threes - int(average)))
+        merge = merge.drop(three_df.index)
+
+        merge = merge.reset_index().drop(columns='index')
+
+    # merge['label'].value_counts().plot.bar()
+    # plt.show()
+    # print(merge)
+
+    # print(merge['label'].value_counts())
+    # merge.plot()
+    # plt.show()
     return merge
+
 
 def get_data(window, verbose):
     # print(os.listdir('TrainingData'))
@@ -71,46 +120,51 @@ def get_data(window, verbose):
 
         train_amount = train_amount.add(df_label.iloc[:int(len(aligned.index) * split)].value_counts(), fill_value=0)
         test_split = int(len(aligned.index) * split)
-        test_start = random.randint(0, len(aligned.index) - test_split)
+        # test_start = random.randint(0, len(aligned.index) - test_split)
+        test_start = len(aligned.index) - test_split
+
         # Train
-        training = df_data.drop(df_data.index[test_start:test_start+test_split]).to_numpy()
-        training_labels = df_label.drop(df_data.index[test_start:test_start+test_split]).to_numpy()
+        training = df_data.drop(df_data.index[test_start:test_start + test_split]).to_numpy()
+        training_labels = df_label.drop(df_data.index[test_start:test_start + test_split]).to_numpy()
         # training_labels = (training_labels * 0) + 2
-        sub_windows = (-(window - 1) + np.expand_dims(np.arange(window), 0) + np.expand_dims(np.arange(len(training)), 0).T)[window - 1:]
+        sub_windows = (-(window - 1) + np.expand_dims(np.arange(window), 0) + np.expand_dims(np.arange(len(training)),
+                                                                                             0).T)[window - 1:]
         sub_features = torch.from_numpy(training[sub_windows])
         train_labels = torch.mode(torch.from_numpy(training_labels[sub_windows]), dim=-1)[0].to(torch.long)
-        padded = []
-        for idx in range(1, window):
-            feature = torch.from_numpy(training[max(0,idx-window):idx])
-            length = feature.shape[0]
-            feature_padded = F.pad(feature, (0,0,window - length,0), value=-1)
-            padded.append(feature_padded)
-        if window != 1:
-            stacked_padded = torch.stack(padded)
-            train_features = torch.cat((stacked_padded, sub_features), 0).to(torch.float32)
-        else:
-            train_features = sub_features.to(torch.float32)
+        # padded = []
+        # for idx in range(1, window):
+        #     feature = torch.from_numpy(training[max(0,idx-window):idx])
+        #     length = feature.shape[0]
+        #     feature_padded = F.pad(feature, (0,0,window - length,0), value=-1)
+        #     padded.append(feature_padded)
+        # if window != 1:
+        #     stacked_padded = torch.stack(padded)
+        #     train_features = torch.cat((stacked_padded, sub_features), 0).to(torch.float32)
+        # else:
+
+        train_features = sub_features.to(torch.float32)
         training_data.append(train_features)
         training_data_labels.append(train_labels)
 
         # Test
-        testing = df_data.iloc[test_start:test_start+test_split, :].to_numpy()
-        testing_labels = df_label.to_numpy()[test_start:test_start+test_split]
-        sub_windows = (-(window - 1) + np.expand_dims(np.arange(window), 0) + np.expand_dims(np.arange(len(testing)), 0).T)[window - 1:]
+        testing = df_data.iloc[test_start:test_start + test_split, :].to_numpy()
+        testing_labels = df_label.to_numpy()[test_start:test_start + test_split]
+        sub_windows = (-(window - 1) + np.expand_dims(np.arange(window), 0) + np.expand_dims(np.arange(len(testing)),
+                                                                                             0).T)[window - 1:]
         sub_features = torch.from_numpy(testing[sub_windows])
         test_labels = torch.mode(torch.from_numpy(testing_labels[sub_windows]), dim=-1)[0].to(torch.long)
 
-        padded = []
-        for idx in range(1, window):
-            feature = torch.from_numpy(testing[max(0, idx - window):idx])
-            length = feature.shape[0]
-            feature_padded = F.pad(feature, (0, 0, window - length, 0), value=0)
-            padded.append(feature_padded)
-        if window != 1:
-            stacked_padded = torch.stack(padded)
-            test_features = torch.cat((stacked_padded, sub_features), 0).to(torch.float32)
-        else:
-            test_features = sub_features.to(torch.float32)
+        # padded = []
+        # for idx in range(1, window):
+        #     feature = torch.from_numpy(testing[max(0, idx - window):idx])
+        #     length = feature.shape[0]
+        #     feature_padded = F.pad(feature, (0, 0, window - length, 0), value=0)
+        #     padded.append(feature_padded)
+        # if window != 1:
+        #     stacked_padded = torch.stack(padded)
+        #     test_features = torch.cat((stacked_padded, sub_features), 0).to(torch.float32)
+        # else:
+        test_features = sub_features.to(torch.float32)
         test_labels = torch.tensor(testing_labels).to(torch.long)
         testing_data.append(test_features)
         testing_data_labels.append(test_labels)
@@ -118,7 +172,7 @@ def get_data(window, verbose):
     train_numpy = train_amount.to_numpy()
     print(train_numpy)
     total = np.sum(train_numpy)
-    weights = [1-np.sqrt(elements/total) for elements in train_numpy]
+    weights = [1 - np.sqrt(elements / total) for elements in train_numpy]
     weights = np.divide(weights, np.sum(weights))
     train_weights = torch.tensor(weights).to(torch.float32).to(device)
     if verbose:

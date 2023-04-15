@@ -52,8 +52,8 @@ def train(subject_data):
         test_in = batch_in.to(device=device)
         test_in = F.pad(test_in, (0,0,0,0,0,mini_batch_size-test_in.shape[0]))
         test_label = batch_label.to(device=device)
-        test_in = F.pad(test_in, (0, 0, 0, 0, 0, mini_batch_size - test_in.shape[0]))
         test_label = F.pad(test_label, (0,mini_batch_size - test_label.shape[0]))
+
         output, state = rnn(test_in, state)
         rnn.zero_grad()
         loss = criterion(output, test_label)
