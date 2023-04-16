@@ -6,10 +6,12 @@ from torch import nn
 import torch
 import torch.nn.functional as F
 
+device = torch.device("cuda:0")
+
 class Encoder(nn.Module):
     def __init__(self, output_size):
         super(Encoder, self).__init__()
-        self.leaky = 0.01
+        self.leaky = 0.1
         self.cnn1 = nn.Conv1d(kernel_size=10, in_channels=6, out_channels=6)
         self.cnn2 = nn.Conv1d(kernel_size=10, in_channels=6, out_channels=6)
 
@@ -42,12 +44,20 @@ class Encoder(nn.Module):
         x = x.permute(0,2,1)
         x, output = self.gru(x)
         x = F.leaky_relu(x, self.leaky)
+        x = F.dropout(x, 0.5)
+
         x = self.linear1(x)
         x = F.leaky_relu(x, self.leaky)
+        x = F.dropout(x, 0.5)
+
         x = self.linear2(x)
         x = F.leaky_relu(x, self.leaky)
+        x = F.dropout(x, 0.5)
+
         x = self.linear3(x)
         x = F.leaky_relu(x, self.leaky)
+        x = F.dropout(x, 0.5)
+
         x = self.linear4(x)
         x = torch.squeeze(x)
         return x
@@ -59,35 +69,50 @@ class Decoder(nn.Module):
     def __init__(self, dec_units, output):
         super(Decoder, self).__init__()
         self.dec_units = dec_units
-        self.leaky = 0.01
+        self.leaky = 0.1
 
         self.W1 = nn.Linear(dec_units, dec_units)
-        self.W2 = nn.Linear(dec_units, dec_units)
-        self.V = nn.Linear(dec_units, 1)
+        self.W2 = nn.Linear(4, dec_units)
+        self.V = nn.Linear(2*dec_units, dec_units)
 
-        self.gru = nn.GRU(input_size=dec_units + 1, hidden_size=dec_units)
+        self.combine = nn.Linear(167, 500)
 
-        self.linear1 = nn.Linear(dec_units, 50)
-        self.linear2 = nn.Linear(50, output)
+        self.gru = nn.GRU(input_size=500, hidden_size=dec_units)
+
+        self.linear1 = nn.Linear(dec_units, 400)
+        self.linear2 = nn.Linear(400, 100)
+        self.linear3 = nn.Linear(100, output)
 
     def forward(self, x, hidden, enc_output):
+        embed = [0,0,0,0]
+        embed[x.item()] = 1
+        embed_tensor = torch.tensor(embed, device=device, dtype=torch.float32)
         w1 = self.W1(hidden)
-        w1 = F.leaky_relu(w1, self.leaky)
-        w2 = self.W2(enc_output)
+        w1 = F.leaky_relu(w1, self.leaky).squeeze(0)
+        w2 = self.W2(embed_tensor)
         w2 = F.leaky_relu(w2, self.leaky)
-        score = self.V(w1 + w2)
-        score = F.leaky_relu(score, self.leaky)
-        # score = torch.squeeze(score)
-        weights = F.softmax(score, dim=-1)
-        enc_output = enc_output.permute(1,0)
-        context = torch.matmul(enc_output, weights).squeeze()
-        context = torch.concat((context, x), dim=0).unsqueeze(0)
 
-        x, hidden = self.gru(context)
+        cat = torch.cat((w1, w2))
+        score = self.V(cat)
+        score = F.leaky_relu(score, self.leaky)
+
+        weights = F.softmax(score, dim=-1)
+        context = torch.matmul(enc_output, weights).squeeze()
+        context = torch.concat((context, embed_tensor), dim=0).unsqueeze(0)
+        x = self.combine(context)
+        x = F.leaky_relu(x, self.leaky)
+        x, hidden = self.gru(x, hidden)
+        x = F.leaky_relu(x, self.leaky)
 
         x = self.linear1(x)
         x = F.leaky_relu(x, self.leaky)
+        x = F.dropout(x, 0.5)
+
         x = self.linear2(x)
+        x = F.leaky_relu(x, self.leaky)
+        x = F.dropout(x, 0.5)
+
+        x = self.linear3(x)
 
         return x, hidden
 

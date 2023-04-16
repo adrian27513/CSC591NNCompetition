@@ -17,17 +17,20 @@ device = torch.device("cuda:0")
 # device = torch.device("cpu")
 
 window = 1
-dec_units = 100
-lr = 0.001
+dec_units = 1000
+# lr = 0.01
 # lr = 0.001
-mini_batch_size = pow(2, 12)
+lr = 0.0001
+mini_batch_size = pow(2, 10)
 # mini_batch_size = 1024
 training_data, training_data_labels, testing_data, testing_data_labels, loss_weights = get_data(window=window, verbose=True)
 
 encoder = Encoder(output_size=dec_units).to(device)
 decoder = Decoder(dec_units=dec_units, output=4).to(device)
-encoder_optimizer = torch.optim.Adam(encoder.parameters(), lr=lr, betas=(0.9, 0.99))
-decoder_optimizer = torch.optim.Adam(decoder.parameters(), lr=lr, betas=(0.9, 0.99))
+encoder_optimizer = torch.optim.Adam(encoder.parameters(), lr=lr, betas=(0.9, 0.99), weight_decay=0.001)
+decoder_optimizer = torch.optim.Adam(decoder.parameters(), lr=lr, betas=(0.9, 0.99), weight_decay=0.001)
+encoder_scheduler = torch.optim.lr_scheduler.CyclicLR(encoder_optimizer, base_lr=0.0001, max_lr=0.01, step_size_up=200, cycle_momentum=False)
+decoder_scheduler = torch.optim.lr_scheduler.CyclicLR(decoder_optimizer, base_lr=0.0001, max_lr=0.01, step_size_up=200, cycle_momentum=False)
 
 criterion = nn.CrossEntropyLoss()
 
@@ -56,16 +59,19 @@ def train(subject_data):
         outputs = []
         for i in range(batch_train_label.shape[0]):
             output, hidden = decoder(start_value, hidden, enc_output)
+            start_value = torch.tensor([batch_train_label[i]]).to(device=device)
             outputs.append(output)
 
         output_tensor = torch.cat(outputs)
 
         loss = criterion(output_tensor, batch_train_label)
         total_loss += loss.item()
-
         loss.backward()
         encoder_optimizer.step()
         decoder_optimizer.step()
+
+        encoder_scheduler.step()
+        decoder_scheduler.step()
 
     return total_loss
 
@@ -120,6 +126,7 @@ for epoch in range(1, n_iters + 1):
                     outputs = []
                     for i in range(batch_train_label.shape[0]):
                         output, hidden = decoder(start_value, hidden, enc_output)
+                        start_value = torch.tensor([torch.argmax(output)]).to(device=device)
                         outputs.append(output)
 
                     output_tensor = torch.cat(outputs)

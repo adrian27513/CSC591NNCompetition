@@ -69,10 +69,10 @@ def align_data(subject):
     # plt.show()
     # plt.clf()
     if average != 0:
-        zero_df = merge[merge.label == 0].sample(n=max(0,zeros - int(average)))
+        zero_df = merge[merge.label == 0].sample(n=max(0,zeros - int(average*.5)))
         merge = merge.drop(zero_df.index)
 
-        ones_df = merge[merge.label == 1].sample(n=max(0,ones - int(average/2)))
+        ones_df = merge[merge.label == 1].sample(n=max(0,ones - int(average/3)))
         merge = merge.drop(ones_df.index)
 
         twos_df = merge[merge.label == 2].sample(n=max(0,twos - int(average)))
