@@ -80,6 +80,7 @@ current_loss = 0
 all_losses = []
 all_iterCt = []
 best_loss = 9999999999999999
+best_f1 = 0
 print("Start Training")
 for epoch in range(1, n_iters + 1):
     decoder.train()
@@ -132,7 +133,7 @@ for epoch in range(1, n_iters + 1):
                     actual.extend(batch_train_label.cpu())
                     equal = torch.eq(out, batch_train_label)
                     pred_sum += torch.sum(equal).item()
-                    total += equal.shape[0]
+                    total += 512
                     test_losses.append(loss.item())
             test_loss = np.average(test_losses)
             confusion = confusion_matrix(actual, predicted)
@@ -141,12 +142,13 @@ for epoch in range(1, n_iters + 1):
             print("Test Loss:", test_loss)
             print("Test Accuracy:", pred_sum/total)
             print("Test F1 Macro", f1)
-            if test_loss < best_loss:
+            if test_loss < best_loss or f1 > best_f1:
                 # torch.save(encoder.state_dict(),
                 #            "models/BestAttEncoder_window" + str(window) + "_decunits" + str(dec_units) + ".pt")
                 torch.save(decoder.state_dict(),
                            "models/BestAttDecoder_window" + str(window) + "_decunits" + str(dec_units) + ".pt")
                 best_loss = test_loss
+                best_f1 = f1
 
     # Add current loss avg to list of losses
     if epoch % plot_every == 0:
