@@ -133,8 +133,9 @@ for epoch in range(1, n_iters + 1):
                     actual.extend(batch_train_label.cpu())
                     equal = torch.eq(out, batch_train_label)
                     pred_sum += torch.sum(equal).item()
-                    total += 512
+                    total += equal.shape[0]
                     test_losses.append(loss.item())
+            print(test_losses)
             test_loss = np.average(test_losses)
             confusion = confusion_matrix(actual, predicted)
             f1 = f1_score(actual, predicted, average='macro')
