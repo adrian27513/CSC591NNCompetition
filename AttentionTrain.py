@@ -224,7 +224,7 @@ for epoch in range(1, n_iters + 1):
         current_loss = 0
         current_test_loss = 0
         current_train_f1 = 0
-        current_test_f1
+        current_test_f1 = 0
 
     # torch.save(encoder.state_dict(), "models/AttEncoder_window"+str(window)+"_decunits"+str(dec_units)+".pt")
     torch.save(decoder.state_dict(), "models/AttDecoder_window" + str(window) + "_decunits" + str(dec_units) + ".pt")
