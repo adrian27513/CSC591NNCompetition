@@ -2,7 +2,14 @@ import torch.nn.functional as F
 import torch.nn as nn
 import torch
 
-print(torch.rand((2,3)))
+x = torch.rand((1,5))
+print(x)
+x = F.softmax(x, dim=-1)
+print(x)
+x = F.softmax(x, dim=-1)
+print(x)
+
+
 # loss = nn.CrossEntropyLoss()
 # input = F.softmax(torch.tensor([[1,0,0,0],[1,0,0,0],[1,0,0,0]]).to(torch.float32), dim=1)
 # # print(input)

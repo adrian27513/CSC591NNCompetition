@@ -5,69 +5,9 @@ import numpy as np
 from torch import nn
 import torch
 import torch.nn.functional as F
+from torch import nn
 
 device = torch.device("cuda:0")
-
-class Encoder(nn.Module):
-    def __init__(self, output_size):
-        super(Encoder, self).__init__()
-        self.output_size = output_size
-        self.leaky = 0.2
-        self.cnn1 = nn.Conv1d(kernel_size=10, in_channels=6, out_channels=6)
-        self.cnn2 = nn.Conv1d(kernel_size=10, in_channels=6, out_channels=6)
-
-        self.max1 = nn.MaxPool1d(kernel_size=3)
-
-        self.cnn3 = nn.Conv1d(kernel_size=5, in_channels=6, out_channels=12)
-        self.cnn4 = nn.Conv1d(kernel_size=5, in_channels=12, out_channels=12)
-
-        self.max2 = nn.MaxPool1d(kernel_size=2)
-
-        self.gru = nn.GRU(input_size=6, hidden_size=output_size, batch_first=True)
-
-        self.linear1 = nn.Linear(output_size, 100)
-        self.linear2 = nn.Linear(100, 256)
-        self.linear3 = nn.Linear(256, 100)
-        self.linear4 = nn.Linear(100, output_size)
-
-
-    def forward(self, x, hidden):
-        # x = self.cnn1(x)
-        # x = F.leaky_relu(x, self.leaky)
-        # x = self.cnn2(x)
-        # x = F.leaky_relu(x, self.leaky)
-        # x = self.max1(x)
-        # x = self.cnn3(x)
-        # x = F.leaky_relu(x, self.leaky)
-        # x = self.cnn4(x)
-        # x = F.leaky_relu(x, self.leaky)
-        # x = self.max2(x)
-        # x = x.permute(0,2,1)
-        # print(x.shape)
-
-        # hidden = hidden.unsqueeze(0)
-        x, output = self.gru(x, hidden)
-        x = F.leaky_relu(output, self.leaky)
-        x = F.dropout(x, 0.5)
-
-        x = self.linear1(x)
-        x = F.leaky_relu(x, self.leaky)
-        x = F.dropout(x, 0.5)
-
-        x = self.linear2(x)
-        x = F.leaky_relu(x, self.leaky)
-        x = F.dropout(x, 0.5)
-
-        x = self.linear3(x)
-        x = F.leaky_relu(x, self.leaky)
-        x = F.dropout(x, 0.5)
-
-        x = self.linear4(x)
-        # x = torch.squeeze(x)
-        return x
-
-    def initialize_hidden(self):
-        return torch.zeros((1, self.output_size)).to(device=device)
 
 class Decoder(nn.Module):
     def __init__(self, dec_units):
@@ -78,6 +18,7 @@ class Decoder(nn.Module):
         self.W1 = nn.Linear(6, dec_units)
         self.W2 = nn.Linear(dec_units, dec_units)
         self.V = nn.Linear(dec_units + 1, 1)
+        self.batch1 = nn.BatchNorm1d(1)
 
 
         self.cnn1 = nn.Conv1d(kernel_size=11, in_channels=6, out_channels=6)
@@ -89,10 +30,12 @@ class Decoder(nn.Module):
         self.cnn4 = nn.Conv1d(kernel_size=5, in_channels=6, out_channels=6)
 
         self.max2 = nn.MaxPool1d(kernel_size=2)
+        self.batch2 = nn.BatchNorm1d(6)
 
         self.gru = nn.GRU(input_size=6, hidden_size=dec_units)
 
         self.linear1 = nn.Linear(dec_units, 400)
+        self.batch3 = nn.BatchNorm1d(1)
         self.linear2 = nn.Linear(400, 1)
         self.linear3 = nn.Linear(int(((((dec_units - 20)/2)-8)/2) + 4), 50)
         self.linear4 = nn.Linear(50, 4)
@@ -113,12 +56,15 @@ class Decoder(nn.Module):
         cat = torch.cat((w1, w2), dim=-1)
         # print(cat.shape)
         score = self.V(cat)
+        score = self.batch1(score)
         score = F.leaky_relu(score, self.leaky)
         # print(score.shape)
-
-        weights = F.softmax(score, dim=-1)
+        # print(score)
+        weights = F.softmax(score, dim=0)
+        print(weights)
         # print(weights.shape)
-
+        # print(weights)
+        # print(enc_output)
         context = enc_output * weights
         # print(context.shape)
         context = context.permute(1, 2, 0)
@@ -135,7 +81,9 @@ class Decoder(nn.Module):
         context = self.cnn4(context)
         # print(context.shape)
         context = F.leaky_relu(context, self.leaky)
+        context = self.batch2(context)
         context = self.max2(context)
+
         # print(context.shape)
 
         context = context.permute(2,0,1)
@@ -146,6 +94,8 @@ class Decoder(nn.Module):
         # print(hidden.shape)
 
         x = self.linear1(x)
+        # print(x.shape)
+        x = self.batch3(x)
         x = F.leaky_relu(x, self.leaky)
         x = F.dropout(x, 0.5)
         # print(x.shape)

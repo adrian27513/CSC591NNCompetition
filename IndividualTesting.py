@@ -5,6 +5,9 @@ from model import RNN
 from sklearn.metrics import confusion_matrix
 from sklearn.metrics import f1_score
 import matplotlib.pyplot as plt
+import numpy as np
+from AttentionModel import Decoder
+from torch import nn
 
 device = torch.device("cuda")
 
@@ -28,62 +31,73 @@ def align_data(subject):
     merge = merge.drop(columns=['time'])
     return merge
 
-aligned_pandas = align_data("subject_006_01")
+aligned_pandas = align_data("subject_006_02")
 labels_pandas = aligned_pandas['label']
 data_pandas = aligned_pandas.drop(columns="label")
 
-input_data = torch.from_numpy(data_pandas.values).to(device)
-test_label = torch.from_numpy(labels_pandas.values).to(device)
+input_data = torch.from_numpy(data_pandas.values).to(device).to(torch.float32)
+test_label = torch.from_numpy(labels_pandas.values).to(device).to(torch.long)
+input_data = input_data.unsqueeze(1)
 
-window = 15
-lstm_size = 500
-linear_size = 278
-dropout = 0.175
-rnn = RNN(input_size=6, output_size=4, dropout=dropout, linear_hidden=linear_size, lstm_hidden=lstm_size, lstm_layers=1).to(device)
-rnn.load_state_dict(torch.load("models/best_rnn_15_17_278_500_1024.pt"))
-rnn.eval()
+criterion = nn.CrossEntropyLoss()
+window = 1
+dec_units = 512
+decoder = Decoder(dec_units=dec_units).to(device)
+# decoder.load_state_dict(torch.load("models/BestAttDecoder_window1_decunits512.pt"))
 
-mini_batch_size = 1024
+mini_batch_size = dec_units
 with torch.no_grad():
+    decoder.eval()
+    test_losses = []
+    total_loss = 0
     pred_sum = 0
     total = 0
     actual = []
     predicted = []
-    state = None
+    loss = 0
+
     batch_input = torch.split(input_data, mini_batch_size)
     batch_label = torch.split(test_label, mini_batch_size)
 
     for batch_in, batch_label in zip(batch_input, batch_label):
-        test_in = batch_in.to(device=device).to(torch.float32)
-        test_in = torch.unsqueeze(test_in, dim=1)
+        batch_train_in = batch_in.to(device=device)
+        batch_train_label = batch_label.to(device=device)
+        batch_train_in = F.pad(batch_train_in, (0, 0, 0, 0, 0, mini_batch_size - batch_train_in.shape[0]))
+        # batch_train_label = F.pad(batch_train_label, (0, mini_batch_size - batch_train_label.shape[0]))
 
-        test_label = batch_label.to(device=device).to(torch.float32)
+        last_output = torch.tensor([0, 0, 0, 0]).to(device=device)
+        decoder_hidden = decoder.initialize_hidden(window).to(device=device)
 
-        test_in = F.pad(test_in, (0, 0, 0, 0, 0, mini_batch_size - test_in.shape[0]))
-        test_label = F.pad(test_label, (0, mini_batch_size - test_label.shape[0]))
+        outputs = []
+        for i in range(batch_train_label.shape[0]):
+            last_output, hidden = decoder(last_output, decoder_hidden, batch_train_in)
+            outputs.append(last_output.unsqueeze(0))
+            # print(last_output)
+            last_output = F.softmax(last_output, dim=-1)
 
-        # test_label = torch.unsqueeze(test_label, dim=1)
+        # print(outputs)
+        output_tensor = torch.cat(outputs, dim=0).to(torch.float32)
+        # print(output_tensor)
+        # print(F.softmax(output_tensor, dim=-1))
 
-        output, state = rnn(test_in, state)
-        max_pred = torch.argmax(output, dim=1)
-        print(max_pred.shape)
-        print(test_label.shape)
-        equal = torch.eq(test_label, max_pred)
+        loss = criterion(output_tensor, batch_train_label)
+
+        print(loss)
+
+        out = torch.argmax(output_tensor, dim=-1)
+        predicted.extend(out.cpu())
+        actual.extend(batch_train_label.cpu())
+        equal = torch.eq(out, batch_train_label)
         pred_sum += torch.sum(equal).item()
         total += equal.shape[0]
+        test_losses.append(loss.item())
+print(test_losses)
+test_loss = np.average(test_losses)
+confusion = confusion_matrix(actual, predicted)
+f1 = f1_score(actual, predicted, average='macro')
+print(confusion)
+print("Test Loss:", test_loss)
+print("Test Accuracy:", pred_sum / total)
+print("Test F1 Macro", f1)
 
-        gt_list = test_label.tolist()
-        pred_list = max_pred.tolist()
-        # X = list(range(len(gt_list)))
-        actual.extend(gt_list)
-        predicted.extend(pred_list)
-        # plt.plot(X, gt_list, label='gt')
-        # plt.plot(X, pred_list, label='pred', alpha=0.3)
-        # plt.legend(loc="upper left")
-        # plt.show()
-        # plt.clf()
-    f1 = f1_score(actual, predicted, average='macro')
-    confusion = confusion_matrix(actual, predicted)
-    print(confusion)
-    print("F1:", f1)
-    print("Accuracy:",pred_sum / total)
+
