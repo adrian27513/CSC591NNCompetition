@@ -61,7 +61,7 @@ class Decoder(nn.Module):
         # print(score.shape)
         # print(score)
         weights = F.softmax(score, dim=0)
-        print(weights)
+        # print(weights)
         # print(weights.shape)
         # print(weights)
         # print(enc_output)

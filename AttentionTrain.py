@@ -30,8 +30,12 @@ decoder = Decoder(dec_units=dec_units).to(device)
 # decoder_optimizer = torch.optim.Adam(decoder.parameters(), betas=(0.9, 0.99), weight_decay=0.01)
 decoder_optimizer = torch.optim.SGD(decoder.parameters(), lr=0.0001, momentum=0.9, weight_decay=0.01)
 # encoder_scheduler = torch.optim.lr_scheduler.CyclicLR(encoder_optimizer, base_lr=0.0001, max_lr=0.01, step_size_up=500, cycle_momentum=False)
-decoder_scheduler = torch.optim.lr_scheduler.CyclicLR(decoder_optimizer, base_lr=0.0001, max_lr=0.01, base_momentum=0.8, max_momentum=.9,  step_size_up=1500)
+decoder_scheduler = torch.optim.lr_scheduler.CyclicLR(decoder_optimizer, base_lr=0.0001, max_lr=0.01, base_momentum=0.8,
+                                                      max_momentum=0.9, step_size_up=1500)
 criterion = nn.CrossEntropyLoss()
+
+trainable = sum(p.numel() for p in decoder.parameters() if p.requires_grad)
+print("Trainable Parameters:", trainable)
 
 
 def train(subject_data):
@@ -83,12 +87,11 @@ def train(subject_data):
         actual.extend(batch_train_label.cpu())
         f1 = f1_score(actual, predicted, average='macro')
         total_f1 += f1
-
         loss = criterion(output_tensor, batch_train_label)
         total_loss += loss.item()
         loss.backward()
 
-        # torch.nn.utils.clip_grad_norm_(decoder.parameters(), )
+        torch.nn.utils.clip_grad_norm_(decoder.parameters(), max_norm=5)
 
         decoder_optimizer.step()
         decoder_scheduler.step()
@@ -122,6 +125,7 @@ for epoch in range(1, n_iters + 1):
         print("Subject: ", i, "/", len(subject_list))
         i += 1
         loss, f1 = train(batch)
+        print(loss)
         current_loss += loss
         current_f1 += f1
     current_f1 /= len(subject_list)
