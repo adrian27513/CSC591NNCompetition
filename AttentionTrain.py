@@ -26,12 +26,13 @@ training_data, training_data_labels, testing_data, testing_data_labels, loss_wei
 
 # encoder = Encoder(output_size=dec_units).to(device)
 decoder = Decoder(dec_units=dec_units).to(device)
+decoder.load_state_dict(torch.load("models/AttDecoder_window1_decunits512.pt"))
 # encoder_optimizer = torch.optim.Adam(encoder.parameters(), lr=lr, betas=(0.9, 0.99))
 # decoder_optimizer = torch.optim.Adam(decoder.parameters(), betas=(0.9, 0.99), weight_decay=0.01)
-decoder_optimizer = torch.optim.SGD(decoder.parameters(), lr=0.0001, momentum=0.9, weight_decay=0.01)
+decoder_optimizer = torch.optim.SGD(decoder.parameters(), lr=0.0001, momentum=0.9, weight_decay=0.001)
 # encoder_scheduler = torch.optim.lr_scheduler.CyclicLR(encoder_optimizer, base_lr=0.0001, max_lr=0.01, step_size_up=500, cycle_momentum=False)
-decoder_scheduler = torch.optim.lr_scheduler.CyclicLR(decoder_optimizer, base_lr=0.0001, max_lr=0.01, base_momentum=0.8,
-                                                      max_momentum=0.9, step_size_up=1500)
+decoder_scheduler = torch.optim.lr_scheduler.CyclicLR(decoder_optimizer, base_lr=0.0001, max_lr=0.001,
+                                                      base_momentum=0.8, max_momentum=0.9, step_size_up=700)
 criterion = nn.CrossEntropyLoss()
 
 trainable = sum(p.numel() for p in decoder.parameters() if p.requires_grad)
@@ -197,8 +198,8 @@ for epoch in range(1, n_iters + 1):
         all_test_losses.append(current_test_loss / plot_every)
         all_f1_train.append(current_train_f1 / plot_every)
         all_f1_test.append(current_test_f1 / plot_every)
-
         all_iterCt.append(epoch)
+
         plt.figure()
         plt.plot(all_iterCt, all_losses, color="blue")
         plt.xlabel('Iteration')
@@ -206,20 +207,20 @@ for epoch in range(1, n_iters + 1):
         plt.savefig("models/Loss.png")
         plt.clf()
 
-        plt.figure()
         plt.plot(all_iterCt, all_test_losses, color="red")
         plt.xlabel('Iteration')
         plt.ylabel('Test Loss')
         plt.savefig("models/TestLoss.png")
         plt.clf()
 
-        plt.figure()
         plt.plot(all_iterCt, all_f1_train, color="red")
         plt.plot(all_iterCt, all_f1_test, color="blue")
         plt.xlabel('Iteration')
         plt.ylabel('F1')
         plt.savefig("models/F1.png")
         plt.clf()
+
+        plt.close()
 
         current_loss = 0
         current_test_loss = 0
