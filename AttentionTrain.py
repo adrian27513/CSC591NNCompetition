@@ -26,7 +26,7 @@ training_data, training_data_labels, testing_data, testing_data_labels, loss_wei
 
 # encoder = Encoder(output_size=dec_units).to(device)
 decoder = Decoder(dec_units=dec_units).to(device)
-decoder.load_state_dict(torch.load("models/AttDecoder_window1_decunits512.pt"))
+# decoder.load_state_dict(torch.load("models/AttDecoder_window1_decunits512.pt"))
 # encoder_optimizer = torch.optim.Adam(encoder.parameters(), lr=lr, betas=(0.9, 0.99))
 # decoder_optimizer = torch.optim.Adam(decoder.parameters(), betas=(0.9, 0.99), weight_decay=0.01)
 decoder_optimizer = torch.optim.SGD(decoder.parameters(), lr=0.0001, momentum=0.9, weight_decay=0.001)
