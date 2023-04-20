@@ -10,16 +10,58 @@ from torch import nn
 device = torch.device("cuda:0")
 
 
+class AttentionModule(nn.Module):
+    def __init__(self):
+        super(AttentionModule, self).__init__()
+        self.leaky = 0.2
+
+        self.attention1 = nn.MultiheadAttention(6, 2)
+        self.layer_norm1 = nn.LayerNorm(6)
+
+        self.attention2 = nn.MultiheadAttention(6, 3)
+        self.layer_norm2 = nn.LayerNorm(6)
+
+        self.att_linear1 = nn.Linear(6, 50)
+        self.att_linear2 = nn.Linear(50, 6)
+        self.layer_norm3 = nn.LayerNorm(6)
+
+    def forward(self, enc_output):
+        att1, _ = self.attention1(query=enc_output, key=enc_output, value=enc_output)
+        att1 = F.dropout(att1, 0.5)
+        add1 = torch.add(att1, enc_output)
+        add1 = F.leaky_relu(add1, self.leaky)
+        norm1 = self.layer_norm1(add1)
+
+        att2, _ = self.attention2(query=enc_output, key=enc_output, value=norm1)
+        att2 = F.dropout(att2, 0.5)
+        add2 = torch.add(att2, norm1)
+        add2 = F.leaky_relu(add2, self.leaky)
+        norm2 = self.layer_norm2(add2)
+
+        att_linear = self.att_linear1(norm2)
+        att_linear = F.leaky_relu(att_linear, self.leaky)
+        att_linear = F.dropout(att_linear, 0.5)
+
+        att_linear = self.att_linear2(att_linear)
+        att_linear = F.leaky_relu(att_linear, self.leaky)
+        att_linear = F.dropout(att_linear, 0.5)
+
+        add3 = torch.add(att_linear, norm2)
+        add3 = F.leaky_relu(add3, self.leaky)
+        norm3 = self.layer_norm3(add3)
+
+        return norm3
+
+
 class Decoder(nn.Module):
     def __init__(self, dec_units):
         super(Decoder, self).__init__()
         self.dec_units = dec_units
         self.leaky = 0.2
+        self.layers = 1
 
-        self.W1 = nn.Linear(6, dec_units)
-        self.W2 = nn.Linear(dec_units, dec_units)
-        self.V = nn.Linear(dec_units + 1, 1)
-        self.batch1 = nn.BatchNorm1d(1)
+        self.attention1 = AttentionModule()
+        self.attention2 = AttentionModule()
 
         self.cnn1 = nn.Conv1d(kernel_size=11, in_channels=6, out_channels=6)
         self.cnn2 = nn.Conv1d(kernel_size=11, in_channels=6, out_channels=12)
@@ -36,15 +78,13 @@ class Decoder(nn.Module):
 
         self.max3 = nn.MaxPool1d(kernel_size=2)
 
-        self.batch2 = nn.BatchNorm1d(24)
-
-        self.gru = nn.GRU(input_size=24, hidden_size=dec_units)
+        self.gru = nn.GRU(input_size=24, hidden_size=dec_units, num_layers=self.layers)
 
         cnn1 = (dec_units - 20) / 2
         cnn2 = (cnn1 - 8) / 2
         cnn3 = (cnn2 - 4) / 2
 
-        self.linear1 = nn.Linear(int(cnn3) * dec_units, 400)
+        self.linear1 = nn.Linear(int(cnn3) * 24, 400)
         self.batch3 = nn.BatchNorm1d(int(cnn3) * dec_units)
         self.linear2 = nn.Linear(400, 400)
         self.linear3 = nn.Linear(404, 100)
@@ -53,37 +93,10 @@ class Decoder(nn.Module):
         self.linear5 = nn.Linear(50, 4)
 
     def forward(self, last_input, hidden, enc_output):
-        # print(last_input.shape)
-        # print(hidden.shape)
-        # print(enc_output.shape)
-        w1 = self.W1(enc_output)
-        w1 = F.leaky_relu(w1, self.leaky)
-        w1 = F.dropout(w1, 0.5)
+        att = self.attention1(enc_output)
+        att = self.attention2(att)
 
-        w2 = self.W2(hidden).permute(2, 1, 0)
-        w2 = F.leaky_relu(w2, self.leaky)
-        w2 = F.dropout(w2, 0.5)
-
-        # print(w1.shape)
-        # print(w2.shape)
-
-        cat = torch.cat((w1, w2), dim=-1)
-        # print(cat.shape)
-        score = self.V(cat)
-        score = self.batch1(score)
-        score = F.leaky_relu(score, self.leaky)
-        # score = F.dropout(score, 0.5)
-        # print(score.shape)
-        # print(score)
-        weights = F.softmax(score, dim=0)
-        # print(weights.shape)
-        # print(weights)
-        # print(enc_output)
-        context = enc_output * weights
-        context = F.leaky_relu(context, self.leaky)
-        context = F.dropout(context, 0.5)
-        # print(context.shape)
-        context = context.permute(1, 2, 0)
+        context = att.permute(1, 2, 0)
 
         context = self.cnn1(context)
         context = F.leaky_relu(context, self.leaky)
@@ -99,7 +112,6 @@ class Decoder(nn.Module):
         context = self.cnn4(context)
         context = F.leaky_relu(context, self.leaky)
         context = F.dropout(context, 0.15)
-        context = self.batch2(context)
         context = self.max2(context)
 
         context = self.cnn5(context)
@@ -115,13 +127,8 @@ class Decoder(nn.Module):
 
         context = context.permute(2, 0, 1)
         # print(context.shape)
-        x, hidden = self.gru(context, hidden)
-        hidden = F.tanh(hidden)
-        x = F.leaky_relu(x, self.leaky)
-        context = F.dropout(context, 0.5)
-        # print(x.shape)
-        # print(hidden.shape)
-        x = torch.flatten(x)
+        x, gru_hidden = self.gru(context, hidden)
+        x = torch.flatten(context)
 
         x = self.linear1(x)
         x = F.leaky_relu(x, self.leaky)
@@ -146,7 +153,7 @@ class Decoder(nn.Module):
         x = self.linear5(x)
         # print(x.shape)
         # print(hidden.shape)
-        return x, hidden
+        return x, gru_hidden
 
     def initialize_hidden(self, window):
-        return torch.zeros((1, window, self.dec_units))
+        return torch.zeros((self.layers, window, self.dec_units))

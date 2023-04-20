@@ -23,16 +23,21 @@ dec_units = mini_batch_size
 teacher_force_ratio = 0.5
 
 training_data, training_data_labels, testing_data, testing_data_labels = get_balanced_data(window, True)
+# training_data = training_data[6:7]
+# training_data_labels = training_data_labels[6:7]
+# testing_data = testing_data[:1]
+# testing_data_labels = testing_data_labels[:1]
 
 # encoder = Encoder(output_size=dec_units).to(device)
 decoder = Decoder(dec_units=dec_units).to(device)
 # decoder.load_state_dict(torch.load("models/AttDecoder_window1_decunits512.pt"))
 # encoder_optimizer = torch.optim.Adam(encoder.parameters(), lr=lr, betas=(0.9, 0.99))
-# decoder_optimizer = torch.optim.Adam(decoder.parameters(), betas=(0.9, 0.99), weight_decay=0.01)
-decoder_optimizer = torch.optim.SGD(decoder.parameters(), lr=0.0001, momentum=0.9, weight_decay=0.01)
-# encoder_scheduler = torch.optim.lr_scheduler.CyclicLR(encoder_optimizer, base_lr=0.0001, max_lr=0.01, step_size_up=500, cycle_momentum=False)
-decoder_scheduler = torch.optim.lr_scheduler.CyclicLR(decoder_optimizer, base_lr=0.001, max_lr=0.01, base_momentum=0.8,
-                                                      max_momentum=0.9, step_size_up=100)
+decoder_optimizer = torch.optim.AdamW(decoder.parameters(), lr=0.001, betas=(0.9, 0.99))
+decoder_scheduler = torch.optim.lr_scheduler.CyclicLR(decoder_optimizer, base_lr=0.001, max_lr=0.01, step_size_up=400,
+                                                      cycle_momentum=False)
+
+# decoder_optimizer = torch.optim.SGD(decoder.parameters(), lr=0.01, momentum=0.9)
+# decoder_scheduler = torch.optim.lr_scheduler.CyclicLR(decoder_optimizer, base_lr=0.001, max_lr=0.01, base_momentum=0.8, max_momentum=0.9,  step_size_up=100)
 criterion = nn.CrossEntropyLoss()
 
 trainable = sum(p.numel() for p in decoder.parameters() if p.requires_grad)
@@ -40,7 +45,6 @@ print("Trainable Parameters:", trainable)
 
 
 def train(subject_data):
-    decoder.zero_grad()
     total_loss = 0
 
     input_data = subject_data[0].to(device=device)
@@ -51,14 +55,20 @@ def train(subject_data):
     actual = []
     predicted = []
     total_f1 = 0
-    batch_len = len(batch_input)
+
+    batch_list = list(zip(batch_input, batch_label))
+    batch_list.pop()
+
+    batch_len = len(batch_list)
     print("Batch Length:", batch_len)
-    for batch_in, batch_label in zip(batch_input, batch_label):
+
+    random.shuffle(batch_list)
+    b_in, b_label = zip(*batch_list)
+    for batch_in, batch_label in zip(b_in, b_label):
+        decoder.zero_grad()
         batch_train_in = batch_in
         batch_train_label = batch_label.to(device=device)
-        batch_train_in = F.pad(batch_train_in, (0, 0, 0, 0, 0, mini_batch_size - batch_train_in.shape[0])).to(
-            device=device)
-        # batch_train_label = F.pad(batch_train_label, (0, mini_batch_size - batch_train_label.shape[0]))
+        # batch_train_in = F.pad(batch_train_in, (0, 0, 0, 0, 0, mini_batch_size - batch_train_in.shape[0])).to(device=device)
 
         last_output = torch.tensor([0, 0, 0, 0]).to(device=device)
         decoder_hidden = decoder.initialize_hidden(window).to(device=device)
@@ -67,7 +77,7 @@ def train(subject_data):
 
         outputs = []
         for i in range(batch_train_label.shape[0]):
-            last_output, hidden = decoder(last_output, decoder_hidden, batch_train_in)
+            last_output, decoder_hidden = decoder(last_output, decoder_hidden, batch_train_in)
             outputs.append(last_output.unsqueeze(0))
             if use_teacher_forcing:
                 last_output = last_output * 0
@@ -80,22 +90,27 @@ def train(subject_data):
         out = torch.argmax(output_tensor, dim=-1)
         predicted.extend(out.cpu())
         actual.extend(batch_train_label.cpu())
+        confusion = confusion_matrix(actual, predicted)
+        print(confusion)
         f1 = f1_score(actual, predicted, average='macro')
         total_f1 += f1
         loss = criterion(output_tensor, batch_train_label)
+        print("F1:", f1)
+        print("Loss:", loss.item())
+        print("---------")
         total_loss += loss.item()
         loss.backward()
 
         torch.nn.utils.clip_grad_norm_(decoder.parameters(), max_norm=5)
 
-    decoder_optimizer.step()
-    decoder_scheduler.step()
+        decoder_optimizer.step()
+        decoder_scheduler.step()
 
     return total_loss / batch_len, total_f1 / batch_len
 
 
-n_iters = 100
-plot_every = 1
+n_iters = 200
+plot_every = 10
 current_loss = 0
 current_test_loss = 0
 
@@ -127,6 +142,7 @@ for epoch in range(1, n_iters + 1):
         current_f1 += f1
         subject_iter_time = time.time() - subject_start
         print("Subject Iter Time:", round(subject_iter_time, 3), "seconds")
+    current_loss /= len(subject_list)
     current_f1 /= len(subject_list)
     current_train_f1 += current_f1
     print("Epoch", epoch, "| Current Loss:", current_loss, "| Current F1:", current_f1)
@@ -147,10 +163,19 @@ for epoch in range(1, n_iters + 1):
                 batch_input = torch.split(input_data, mini_batch_size)
                 batch_label = torch.split(test_label, mini_batch_size)
 
-                for batch_in, batch_label in zip(batch_input, batch_label):
+                batch_list = list(zip(batch_input, batch_label))
+                batch_list.pop()
+
+                batch_len = len(batch_list)
+                print("Batch Length:", batch_len)
+
+                random.shuffle(batch_list)
+                b_in, b_label = zip(*batch_list)
+
+                for batch_in, batch_label in zip(b_in, b_label):
                     batch_train_in = batch_in.to(device=device)
                     batch_train_label = batch_label.to(device=device)
-                    batch_train_in = F.pad(batch_train_in, (0, 0, 0, 0, 0, mini_batch_size - batch_train_in.shape[0]))
+                    # batch_train_in = F.pad(batch_train_in, (0, 0, 0, 0, 0, mini_batch_size - batch_train_in.shape[0]))
                     # batch_train_label = F.pad(batch_train_label, (0, mini_batch_size - batch_train_label.shape[0]))
 
                     last_output = torch.tensor([0, 0, 0, 0]).to(device=device)
@@ -158,7 +183,7 @@ for epoch in range(1, n_iters + 1):
 
                     outputs = []
                     for i in range(batch_train_label.shape[0]):
-                        last_output, hidden = decoder(last_output, decoder_hidden, batch_train_in)
+                        last_output, decoder_hidden = decoder(last_output, decoder_hidden, batch_train_in)
                         outputs.append(last_output.unsqueeze(0))
                         last_output = F.softmax(last_output, dim=-1)
 
@@ -189,15 +214,14 @@ for epoch in range(1, n_iters + 1):
                            "models/BestAttDecoder_window" + str(window) + "_decunits" + str(dec_units) + ".pt")
                 best_loss = test_loss
                 best_f1 = f1
-
     # Add current loss avg to list of losses
-    if epoch % plot_every == 0:
-        all_losses.append((current_loss / len(subject_list)) / plot_every)
-        all_test_losses.append(current_test_loss / plot_every)
-        all_f1_train.append(current_train_f1 / plot_every)
-        all_f1_test.append(current_test_f1 / plot_every)
-        all_iterCt.append(epoch)
+    all_losses.append(current_loss)
+    all_test_losses.append(current_test_loss)
+    all_f1_train.append(current_train_f1)
+    all_f1_test.append(current_test_f1)
+    all_iterCt.append(epoch)
 
+    if epoch % plot_every == 0:
         plt.figure()
         plt.plot(all_iterCt, all_losses, color="red", label="Train")
         plt.plot(all_iterCt, all_test_losses, color="blue", label="Test")
@@ -216,11 +240,16 @@ for epoch in range(1, n_iters + 1):
         plt.clf()
 
         plt.close()
-
-        current_loss = 0
-        current_test_loss = 0
-        current_train_f1 = 0
-        current_test_f1 = 0
+    print("=======================")
+    print("Train Losses:", all_losses)
+    print("Test Losses:", all_test_losses)
+    print("Train F1:", all_f1_train)
+    print("Test F1:", all_f1_test)
+    print("=======================")
+    current_loss = 0
+    current_test_loss = 0
+    current_train_f1 = 0
+    current_test_f1 = 0
 
     # torch.save(encoder.state_dict(), "models/AttEncoder_window"+str(window)+"_decunits"+str(dec_units)+".pt")
     torch.save(decoder.state_dict(), "models/AttDecoder_window" + str(window) + "_decunits" + str(dec_units) + ".pt")
@@ -232,5 +261,6 @@ for epoch in range(1, n_iters + 1):
     seconds = int((hours_left * 3600) % 60)
     print("Estimated Time: ", hours, "hours", minutes, "minutes", seconds, "seconds")
     print("=======================")
+    print("=-=-=-=-=-=-=-=-=-=-=-=")
 
 # plt.show()
