@@ -1,7 +1,8 @@
-from util import get_data
+from util import get_balanced_data
+import pickle
+import pandas as pd
 
-training_data, training_data_labels, testing_data, testing_data_labels, train_weights = get_data(1, True)
+train, train_label, test, test_label = get_balanced_data(1, True)
 
-print(training_data[0].shape)
-print(training_data_labels[0].shape)
-print(train_weights)
+for t in train:
+    print(t.shape)

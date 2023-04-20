@@ -8,9 +8,10 @@ import torch.nn.functional as F
 import random
 import time
 from AttentionModel import Decoder
-from util import get_data
+from util import get_balanced_data
 from sklearn.metrics import confusion_matrix
 from sklearn.metrics import f1_score
+import random
 
 # torch.autograd.set_detect_anomaly(True)
 device = torch.device("cuda:0")
@@ -21,18 +22,17 @@ mini_batch_size = pow(2, 9)
 dec_units = mini_batch_size
 teacher_force_ratio = 0.5
 
-training_data, training_data_labels, testing_data, testing_data_labels, loss_weights = get_data(window=window,
-                                                                                                verbose=True)
+training_data, training_data_labels, testing_data, testing_data_labels = get_balanced_data(window, True)
 
 # encoder = Encoder(output_size=dec_units).to(device)
 decoder = Decoder(dec_units=dec_units).to(device)
 # decoder.load_state_dict(torch.load("models/AttDecoder_window1_decunits512.pt"))
 # encoder_optimizer = torch.optim.Adam(encoder.parameters(), lr=lr, betas=(0.9, 0.99))
 # decoder_optimizer = torch.optim.Adam(decoder.parameters(), betas=(0.9, 0.99), weight_decay=0.01)
-decoder_optimizer = torch.optim.SGD(decoder.parameters(), lr=0.0001, momentum=0.9, weight_decay=0.001)
+decoder_optimizer = torch.optim.SGD(decoder.parameters(), lr=0.0001, momentum=0.9, weight_decay=0.01)
 # encoder_scheduler = torch.optim.lr_scheduler.CyclicLR(encoder_optimizer, base_lr=0.0001, max_lr=0.01, step_size_up=500, cycle_momentum=False)
-decoder_scheduler = torch.optim.lr_scheduler.CyclicLR(decoder_optimizer, base_lr=0.0001, max_lr=0.001,
-                                                      base_momentum=0.8, max_momentum=0.9, step_size_up=700)
+decoder_scheduler = torch.optim.lr_scheduler.CyclicLR(decoder_optimizer, base_lr=0.001, max_lr=0.01, base_momentum=0.8,
+                                                      max_momentum=0.9, step_size_up=100)
 criterion = nn.CrossEntropyLoss()
 
 trainable = sum(p.numel() for p in decoder.parameters() if p.requires_grad)
@@ -40,9 +40,8 @@ print("Trainable Parameters:", trainable)
 
 
 def train(subject_data):
-    total_loss = 0
-
     decoder.zero_grad()
+    total_loss = 0
 
     input_data = subject_data[0].to(device=device)
     input_label = subject_data[1].to(device=device)
@@ -53,6 +52,7 @@ def train(subject_data):
     predicted = []
     total_f1 = 0
     batch_len = len(batch_input)
+    print("Batch Length:", batch_len)
     for batch_in, batch_label in zip(batch_input, batch_label):
         batch_train_in = batch_in
         batch_train_label = batch_label.to(device=device)
@@ -60,12 +60,6 @@ def train(subject_data):
             device=device)
         # batch_train_label = F.pad(batch_train_label, (0, mini_batch_size - batch_train_label.shape[0]))
 
-        # encoder_hidden = encoder.initialize_hidden()
-        #
-        # for i in range(batch_train_in.shape[0]):
-        #     train_input = batch_train_in[0]
-        #     encoder_hidden = encoder(train_input, encoder_hidden)
-        #
         last_output = torch.tensor([0, 0, 0, 0]).to(device=device)
         decoder_hidden = decoder.initialize_hidden(window).to(device=device)
 
@@ -94,10 +88,10 @@ def train(subject_data):
 
         torch.nn.utils.clip_grad_norm_(decoder.parameters(), max_norm=5)
 
-        decoder_optimizer.step()
-        decoder_scheduler.step()
+    decoder_optimizer.step()
+    decoder_scheduler.step()
 
-    return total_loss, total_f1 / batch_len
+    return total_loss / batch_len, total_f1 / batch_len
 
 
 n_iters = 100
@@ -120,15 +114,19 @@ for epoch in range(1, n_iters + 1):
     decoder.train()
     start = time.time()
     subject_list = list(zip(training_data, training_data_labels))
+    random.shuffle(subject_list)
     i = 1
     current_f1 = 0
     for batch in subject_list:
+        subject_start = time.time()
         print("Subject: ", i, "/", len(subject_list))
         i += 1
         loss, f1 = train(batch)
-        print(loss)
+        print("Subject Loss", loss)
         current_loss += loss
         current_f1 += f1
+        subject_iter_time = time.time() - subject_start
+        print("Subject Iter Time:", round(subject_iter_time, 3), "seconds")
     current_f1 /= len(subject_list)
     current_train_f1 += current_f1
     print("Epoch", epoch, "| Current Loss:", current_loss, "| Current F1:", current_f1)
@@ -194,29 +192,26 @@ for epoch in range(1, n_iters + 1):
 
     # Add current loss avg to list of losses
     if epoch % plot_every == 0:
-        all_losses.append(current_loss / plot_every)
+        all_losses.append((current_loss / len(subject_list)) / plot_every)
         all_test_losses.append(current_test_loss / plot_every)
         all_f1_train.append(current_train_f1 / plot_every)
         all_f1_test.append(current_test_f1 / plot_every)
         all_iterCt.append(epoch)
 
         plt.figure()
-        plt.plot(all_iterCt, all_losses, color="blue")
+        plt.plot(all_iterCt, all_losses, color="red", label="Train")
+        plt.plot(all_iterCt, all_test_losses, color="blue", label="Test")
         plt.xlabel('Iteration')
-        plt.ylabel('Training Loss')
+        plt.ylabel('Loss')
+        plt.legend(loc="upper left")
         plt.savefig("models/Loss.png")
         plt.clf()
 
-        plt.plot(all_iterCt, all_test_losses, color="red")
-        plt.xlabel('Iteration')
-        plt.ylabel('Test Loss')
-        plt.savefig("models/TestLoss.png")
-        plt.clf()
-
-        plt.plot(all_iterCt, all_f1_train, color="red")
-        plt.plot(all_iterCt, all_f1_test, color="blue")
+        plt.plot(all_iterCt, all_f1_train, color="red", label="Train")
+        plt.plot(all_iterCt, all_f1_test, color="blue", label="Test")
         plt.xlabel('Iteration')
         plt.ylabel('F1')
+        plt.legend(loc="upper left")
         plt.savefig("models/F1.png")
         plt.clf()
 
