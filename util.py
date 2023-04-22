@@ -6,6 +6,7 @@ import torch.nn.functional as F
 import random
 import matplotlib.pyplot as plt
 import pickle
+from torch.utils.data import Dataset
 
 def balance(merge, strict):
     counts = merge['class'].value_counts()
@@ -118,3 +119,13 @@ def get_balanced_data(window, verbose):
         print("Done Getting Data")
         print("=================")
     return training_data, training_data_labels, testing_data, testing_data_labels
+
+class GyroDataset(Dataset):
+    def __init__(self, data):
+        self.data = data
+
+    def __len__(self):
+        return len(self.data)
+
+    def __getitem__(self, idx):
+        return self.data[idx][0], self.data[idx][1]
